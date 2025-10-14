@@ -17,8 +17,6 @@ const DEFAULTS = {
   loginRateLimit: { windowMs: 15 * 60 * 1000, max: 8 }, // 8 attempts / 15min
   globalRateLimit: { windowMs: 60 * 1000, max: 200 }, // 200 req / min default
   csp: "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';",
-  sessionsDbFile: "sessions.sqlite",
-  sessionsDir: path.join(__dirname, "data"),
   adminResetTokenEnv: "ADMIN_RESET_TOKEN",
 };
 
@@ -138,19 +136,6 @@ function initSecurity(app, db, opts = {}) {
       });
     }
     return { migrated: false };
-  }
-
-  function requireAuth(req, res, next) {
-    if (req.session && req.session.userId) return next();
-    if (
-      req.xhr ||
-      (req.headers.accept && req.headers.accept.indexOf("json") > -1)
-    ) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    return res.redirect(
-      `/login?next=${encodeURIComponent(req.originalUrl || "/")}`
-    );
   }
 
   function regenerateSession(req, res, next) {

@@ -1,0 +1,10 @@
+<h2>Register</h2>
+<% if (message) { %>
+  <p style="color:red;"><%= message %></p>
+<% } %>
+<form method="POST" action="/register">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Username: <input type="text" name="username" required></label><br>
+  <label>Password: <input type="password" name="password" required></label><br>
+  <button type="submit">Register</button>
+</form>

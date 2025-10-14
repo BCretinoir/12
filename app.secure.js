@@ -6,16 +6,15 @@ const csrf = require("csurf");
 const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const xss = require("xss");
-
 const MySQLStore = require("express-mysql-session")(session);
 
 const DEFAULTS = {
   sessionSecret: process.env.SESSION_SECRET || "please-change-me",
   sessionCookieName: "sid",
-  sessionMaxAgeMs: 24 * 60 * 60 * 1000, // 1 day
+  sessionMaxAgeMs: 24 * 60 * 60 * 1000,
   saltRounds: 12,
-  loginRateLimit: { windowMs: 15 * 60 * 1000, max: 8 }, // 8 attempts / 15min
-  globalRateLimit: { windowMs: 60 * 1000, max: 200 }, // 200 req / min default
+  loginRateLimit: { windowMs: 15 * 60 * 1000, max: 8 },
+  globalRateLimit: { windowMs: 60 * 1000, max: 200 },
   csp: "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';",
   adminResetTokenEnv: "ADMIN_RESET_TOKEN",
 };
@@ -30,24 +29,17 @@ function sid(req, res, next) {
 function initSecurity(app, db, opts = {}) {
   const cfg = Object.assign({}, DEFAULTS, opts);
 
-  // 1) Helmet + CSP + HSTS
+  // --- Security headers & Helmet ---
   app.use(helmet());
-  app.use(helmet({ crossOriginEmbedderPolicy: true }));
-  app.use(helmet({ crossOriginEmbedderPolicy: { policy: "credentialless" } }));
-  app.use(helmet({ crossOriginOpenerPolicy: { policy: "same-origin" } }));
-  app.use(helmet.strictTransportSecurity());
   app.use((req, res, next) => {
     res.setHeader("Content-Security-Policy", cfg.csp);
-    if (process.env.NODE_ENV === "production") {
-      res.setHeader(
-        "Strict-Transport-Security",
-        "max-age=63072000; includeSubDomains; preload"
-      );
-    }
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer-when-downgrade");
     next();
   });
 
-  // 2) Session store (SQLite by default)
+  // --- Session store ---
   app.use(
     session({
       store: new MySQLStore({
@@ -60,25 +52,20 @@ function initSecurity(app, db, opts = {}) {
       secret: cfg.sessionSecret,
       resave: false,
       saveUninitialized: false,
-      cookie: {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: cfg.sessionMaxAgeMs,
-      },
+      cookie: { httpOnly: true, sameSite: "lax", maxAge: cfg.sessionMaxAgeMs },
     })
   );
 
   app.use(sid);
 
-  // 3) CSRF protection (after session middleware)
+  // --- CSRF protection ---
   app.use(csrf());
   app.use((req, res, next) => {
     res.locals.csrfToken = req.csrfToken();
     next();
   });
 
-  // 4) Rate limiting
+  // --- Rate limiting ---
   const globalLimiter = rateLimit({
     windowMs: cfg.globalRateLimit.windowMs,
     max: cfg.globalRateLimit.max,
@@ -90,20 +77,12 @@ function initSecurity(app, db, opts = {}) {
   const loginLimiter = rateLimit({
     windowMs: cfg.loginRateLimit.windowMs,
     max: cfg.loginRateLimit.max,
-    message: "Too many login attempts from this IP, please try again later.",
+    message: "Too many login attempts from this IP, try later.",
     standardHeaders: true,
     legacyHeaders: false,
   });
 
-  function requireAuth(req, res, next) {
-    if (req.session && req.session.userId) return next();
-    return res.redirect(
-      `/login?next=${encodeURIComponent(req.originalUrl || "/")}`
-    );
-  }
-
-  // Helpers
-
+  // --- Helpers ---
   function escapeHtml(str) {
     return String(str || "")
       .replace(/&/g, "&amp;")
@@ -115,7 +94,7 @@ function initSecurity(app, db, opts = {}) {
 
   function sanitizeHtml(input) {
     return xss(String(input || ""), {
-      whiteList: {}, // no tags by default
+      whiteList: {},
       stripTagBody: ["script"],
     });
   }
@@ -128,10 +107,7 @@ function initSecurity(app, db, opts = {}) {
         db.query(
           "UPDATE users SET password_hash = ?, password_plain = NULL WHERE id = ?",
           [hash, row.id],
-          function (err) {
-            if (err) return reject(err);
-            resolve({ migrated: true });
-          }
+          (err) => (err ? reject(err) : resolve({ migrated: true }))
         );
       });
     }
@@ -139,28 +115,49 @@ function initSecurity(app, db, opts = {}) {
   }
 
   function regenerateSession(req, res, next) {
+    const { userId, username, isAdmin } = req.session;
     req.session.regenerate((err) => {
       if (err) return next(err);
-      return next();
+      req.session.userId = userId;
+      req.session.username = username;
+      req.session.isAdmin = isAdmin;
+      next();
     });
+  }
+
+  function requireAuth(req, res, next) {
+    if (req.session && req.session.userId) return next();
+    return res.redirect(
+      `/login?next=${encodeURIComponent(req.originalUrl || "/")}`
+    );
   }
 
   function protectResetDb(req, res, next) {
     const token = process.env[cfg.adminResetTokenEnv];
     const provided = req.query.token || req.headers["x-admin-token"];
-    if (token && provided && provided === token) return next();
-    if (req.session && req.session.isAdmin) return next();
+    if ((token && provided === token) || (req.session && req.session.isAdmin))
+      return next();
     return res.status(403).send("Forbidden");
   }
 
+  async function logAction(db, req, action, details = null) {
+    const userId = req.session?.userId || null;
+    const username = req.session?.username || null;
+    const sql =
+      "INSERT INTO logs (user_id, username, action, details) VALUES (?, ?, ?, ?)";
+    return new Promise((resolve, reject) => {
+      db.query(sql, [userId, username, action, details], (err, result) => {
+        if (err) return reject(err);
+        resolve(result.insertId);
+      });
+    });
+  }
+
   function safeRenderMiddleware(req, res, next) {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("Referrer-Policy", "no-referrer-when-downgrade");
     next();
   }
 
-  const helpers = {
+  return {
     escapeHtml,
     sanitizeHtml,
     migratePasswordOnLogin,
@@ -170,11 +167,8 @@ function initSecurity(app, db, opts = {}) {
     safeRenderMiddleware,
     regenerateSession,
     sid,
+    logAction,
   };
-
-  app.locals.secure = helpers;
-
-  return helpers;
 }
 
 module.exports = { initSecurity };

@@ -5,7 +5,6 @@ const path = require("path");
 const fs = require("fs");
 const bcrypt = require("bcrypt");
 const engine = require("ejs-locals");
-const xss = require("xss");
 const connexion = require("mysql");
 const { initSecurity } = require("./app.secure");
 
@@ -18,79 +17,54 @@ app.set("views", path.join(__dirname, "views"));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Connexion MySQL
-var db = connexion.createConnection({
+
+// --- MySQL connection ---
+const db = connexion.createConnection({
   host: "localhost",
   user: "root",
   password: "",
-  database: "my_db", 
+  database: "my_db",
   multipleStatements: true,
 });
-
 db.connect((err) => {
   if (err) {
-    console.error("Erreur de connexion MySQL:", err);
+    console.error(err);
     process.exit(1);
-  } else {
-    console.log(" Connexion MySQL OK !");
   }
+  console.log("MySQL connected");
 });
 
-// --- Init security middleware ---
-const secure = initSecurity(app, db, {
-  sessionSecret: process.env.SESSION_SECRET || "please-change-me",
-  sessionsDir: path.join(__dirname, "data"),
-  sessionsDbFile: "sessions.mysql",
-});
+// --- Init security ---
+const secure = initSecurity(app, db);
+const profileRoutes = require("./profile.routes")(secure, db);
+app.use("/profile", profileRoutes);
 
+// --- Locals middleware ---
 app.use((req, res, next) => {
   res.locals.user = req.session?.username || null;
   res.locals.userIsAdmin = req.session?.isAdmin === true;
-  try {
-    res.locals.session = req.session || {};
-    if (req.csrfToken) {
-      res.locals.session.csrfToken = req.csrfToken();
-    }
-  } catch (err) {
-    // Ignore si pas de CSRF sur la route
-  }
   next();
 });
 
-const escapeHtml = secure.escapeHtml;
-const sanitizeHtml = secure.sanitizeHtml;
-const loginLimiter = secure.loginLimiter;
-const requireAuth = secure.requireAuth;
-const protectResetDb = secure.protectResetDb;
-const safeRenderMiddleware = secure.safeRenderMiddleware;
+// --- Routes ---
 
-// Apply safeRenderMiddleware globally
-app.use(safeRenderMiddleware);
-
-// --- ROUTES ---
-
-// Home page
+// Home
 app.get("/", (req, res) => {
   db.query(
     "SELECT id, title, body FROM posts ORDER BY id DESC LIMIT 50",
     (err, rows) => {
       if (err) return res.status(500).send("DB error");
-      res.render("index", {
-        posts: rows,
-        user: req.session.username ? escapeHtml(req.session.username) : null,
-        userIsAdmin: req.session.isAdmin === true,
-      });
+      res.render("index", { posts: rows });
     }
   );
 });
 
-// Login page
+// Login
 app.get("/login", (req, res) => {
-  res.render("login", { message: null, csrfToken: req.csrfToken() });
+  res.render("login", { message: null });
 });
 
-// POST /login
-app.post("/login", loginLimiter, async (req, res) => {
+app.post("/login", secure.loginLimiter, async (req, res) => {
   const username = String(req.body.username || "").trim();
   const password = String(req.body.password || "");
 
@@ -100,94 +74,75 @@ app.post("/login", loginLimiter, async (req, res) => {
     async (err, results) => {
       if (err) return res.status(500).send("DB error");
       if (!results || results.length === 0)
-        return res.render("login", {
-          message: "Invalid credentials",
-          csrfToken: req.csrfToken(),
-        });
+        return res.render("login", { message: "Invalid credentials" });
 
       const row = results[0];
 
       try {
-        // 1) Plain password migration
         if (row.password_plain && row.password_plain === password) {
           await secure.migratePasswordOnLogin(row, password);
-          req.session.userId = row.id;
-          req.session.username = row.username;
-          req.session.isAdmin = row.username === "admin";
-          return res.redirect("/");
-        }
-
-        // 2) bcrypt check
-        if (
+        } else if (
           row.password_hash &&
           (await bcrypt.compare(password, row.password_hash))
         ) {
-          req.session.userId = row.id;
-          req.session.username = row.username;
-          req.session.isAdmin = row.username === "admin";
-          return res.redirect("/");
+          // OK
+        } else {
+          return res.render("login", { message: "Invalid credentials" });
         }
 
-        return res.render("login", {
-          message: "Invalid credentials",
-          csrfToken: req.csrfToken(),
-        });
+        req.session.userId = row.id;
+        req.session.username = row.username;
+        req.session.isAdmin = row.username === "admin";
+        await secure.logAction(db, req, "login");
+        res.redirect("/");
       } catch (e) {
-        console.error("Login error:", e);
-        return res.status(500).send("Server error");
+        console.error(e);
+        res.status(500).send("Server error");
       }
     }
   );
 });
 
 // Logout
-app.post("/logout", (req, res) => {
+app.post("/logout", async (req, res) => {
+  await secure
+    .logAction(db, req, "logout", "User logged out")
+    .catch(console.error);
   req.session.destroy((err) => {
-    if (err) console.error("Session destroy error:", err);
+    if (err) console.error(err);
     res.redirect("/");
   });
 });
 
-// Create a post
-app.get("/post", requireAuth, (req, res) => {
-  res.render("post", { csrfToken: req.csrfToken() });
+// Create post
+app.get("/post", secure.requireAuth, (req, res) => {
+  res.render("post");
 });
+app.post("/post", secure.requireAuth, async (req, res) => {
+  const title = String(req.body.title || "").trim();
+  const body = secure.sanitizeHtml(req.body.body || "");
 
-app.post("/post", requireAuth, (req, res) => {
-  const title = req.body.title ? String(req.body.title).trim() : "";
-  const body = req.body.body ? xss(String(req.body.body)) : "";
-  const sql = "INSERT INTO posts (title, body) VALUES (?, ?)";
-
-  db.query(sql, [title, body], (err, result) => {
-    if (err) return res.status(500).send("DB error");
-    secure.regenerateSession(req, res, () => {
-      req.session.userId = req.session.userId;
-      req.session.username = req.session.username;
-      req.session.isAdmin = req.session.username === "admin";
+  try {
+    await new Promise((resolve, reject) => {
+      db.query(
+        "INSERT INTO posts (title, body) VALUES (?, ?)",
+        [title, body],
+        (err) => (err ? reject(err) : resolve())
+      );
+    });
+    await secure.logAction(db, req, "post_create", `Title: ${title}`);
+    req.session.save((err) => {
+      if (err) console.error(err);
       res.redirect("/");
     });
-  });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("DB error");
+  }
 });
 
-// Search
-app.get("/search", (req, res) => {
-  let q = String(req.query.q || "")
-    .slice(0, 200)
-    .trim();
-  const like = `%${q}%`;
-
-  db.query(
-    "SELECT id, title, body FROM posts WHERE title LIKE ? OR body LIKE ? LIMIT 100",
-    [like, like],
-    (err, rows) => {
-      if (err) return res.status(500).send("DB error");
-      res.render("search", { q, results: rows });
-    }
-  );
-});
-
-// Reset DB (protected)
-app.get("/reset-db", requireAuth, protectResetDb, (req, res) => {
+// Reset DB
+app.get("/reset-db", secure.requireAuth, secure.protectResetDb, (req, res) => {
   const init = fs.readFileSync(
     path.join(__dirname, "scripts", "init_db.sql"),
     "utf8"
@@ -198,8 +153,53 @@ app.get("/reset-db", requireAuth, protectResetDb, (req, res) => {
   });
 });
 
+app.get("/register", (req, res) => {
+  res.render("register", { message: null });
+});
+
+// POST /register
+app.post("/register", async (req, res) => {
+  const username = String(req.body.username || "").trim();
+  const password = String(req.body.password || "");
+
+  if (!username || !password) {
+    return res.render("register", {
+      message: "Username and password are required",
+    });
+  }
+
+  try {
+    db.query(
+      "SELECT id FROM users WHERE username = ? LIMIT 1",
+      [username],
+      async (err, results) => {
+        if (err) return res.status(500).send("DB error");
+        if (results.length > 0) {
+          return res.render("register", { message: "Username already exists" });
+        }
+
+        // Hash du mot de passe
+        const hash = await bcrypt.hash(password, secure.saltRounds || 12);
+
+        // Insert dans la DB
+        db.query(
+          "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+          [username, hash],
+          (err) => {
+            if (err) return res.status(500).send("DB error");
+            res.redirect("/login");
+          }
+        );
+      }
+    );
+  } catch (e) {
+    console.error("Register error:", e);
+    res.status(500).send("Server error");
+  }
+});
+
 // --- Start server ---
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`Secure app listening on http://127.0.0.1:${PORT}`);
-});
+app.listen(PORT, "127.0.0.1", () =>
+  console.log(`App listening on http://127.0.0.1:${PORT}`)
+);

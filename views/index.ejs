@@ -1,0 +1,12 @@
+<% layout('layout') -%>
+<h2>Articles récents</h2>
+<% if (posts.length === 0) { %>
+    <p>Aucun post.</p>
+<% } else { %>
+    <% posts.forEach(function(p){ %>
+        <article>
+            <h3><%- p.title %></h3>
+            <p><%- p.body %></p>
+        </article>
+    <% }) %>
+<% } %>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mini Blog - TP sécurité (VULN)</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>
+        Mini-blog pédagogique <span style="color: orange">[VULNERABLE]</span>
+      </h1>
+      <nav>
+        <a href="/">Home</a> | 
+        <a href="/post">New Post</a> | 
+        <a href="/search">Search</a> | 
+
+        <% if (userIsAdmin) { %>
+          <a href="/reset-db">Reset DB</a> | 
+        <% } %>
+
+        <% if (user) { %>
+          <span>Bonjour <%= user %>!</span>
+          <form method="POST" action="/logout" style="display:inline;">
+            <input type="hidden" name="_csrf" value="<%= session.csrfToken %>" />
+            <button type="submit">Logout</button>
+          </form>
+        <% } else { %>
+          <a href="/login">Login</a>
+        <% } %>
+      </nav>
+    </header>
+
+    <main>
+      <%- body %>
+    </main>
+  </body>
+</html>

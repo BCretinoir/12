@@ -1,0 +1,18 @@
+<% layout('layout') -%>
+<h2>Search</h2>
+<form method="get" action="/search">
+    <input name="q" value="<%- q %>" />
+    <button type="submit">Search</button>
+</form>
+
+<h3>Results for "<%= q %>"</h3>
+<% if (!results || results.length === 0) { %>
+    <p>No results</p>
+<% } else { %>
+    <% results.forEach(function(r){ %>
+        <article>
+            <h4><%= r.title %></h4>
+            <p><%= r.body %></p>
+        </article>
+    <% }) %>
+<% } %>

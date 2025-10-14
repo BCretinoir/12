@@ -2,13 +2,12 @@
 const path = require("path");
 const helmet = require("helmet");
 const session = require("express-session");
-const SQLiteStoreFactory = require("connect-sqlite3");
 const csrf = require("csurf");
 const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const xss = require("xss");
 
-const SQLiteStore = SQLiteStoreFactory(session);
+const MySQLStore = require("express-mysql-session")(session);
 
 const DEFAULTS = {
   sessionSecret: process.env.SESSION_SECRET || "please-change-me",
@@ -53,9 +52,11 @@ function initSecurity(app, db, opts = {}) {
   // 2) Session store (SQLite by default)
   app.use(
     session({
-      store: new SQLiteStore({
-        db: cfg.sessionsDbFile,
-        dir: cfg.sessionsDir,
+      store: new MySQLStore({
+        host: "localhost",
+        user: "root",
+        password: "",
+        database: "my_db",
       }),
       name: cfg.sessionCookieName,
       secret: cfg.sessionSecret,
@@ -126,7 +127,7 @@ function initSecurity(app, db, opts = {}) {
     if (row.password_plain && row.password_plain === providedPassword) {
       const hash = await bcrypt.hash(providedPassword, cfg.saltRounds);
       return new Promise((resolve, reject) => {
-        db.run(
+        db.query(
           "UPDATE users SET password_hash = ?, password_plain = NULL WHERE id = ?",
           [hash, row.id],
           function (err) {

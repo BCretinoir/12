@@ -45,6 +45,33 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(async (req, res, next) => {
+  if (req.session?.username) {
+    res.locals.user = {
+      username: req.session.username,
+      avatar: null,
+    };
+    try {
+      const results = await new Promise((resolve, reject) => {
+        db.query(
+          "SELECT filename FROM avatars WHERE user_id = ? AND is_active = 1 LIMIT 1",
+          [req.session.userId],
+          (err, results) => (err ? reject(err) : resolve(results))
+        );
+      });
+      if (results && results[0]) {
+        res.locals.user.avatar = results[0];
+      }
+    } catch (err) {
+      console.error("Error fetching user avatar:", err);
+    }
+  } else {
+    res.locals.user = null;
+  }
+  res.locals.userIsAdmin = req.session?.isAdmin === true;
+  next();
+});
+
 // --- Routes ---
 
 // Home

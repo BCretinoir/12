@@ -17,7 +17,6 @@ app.set("views", path.join(__dirname, "views"));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 
-
 // --- MySQL connection ---
 const db = connexion.createConnection({
   host: "localhost",
@@ -36,7 +35,7 @@ db.connect((err) => {
 
 // --- Init security ---
 const secure = initSecurity(app, db);
-const profileRoutes = require("./profile.routes")(secure, db);
+const profileRoutes = require("./profile.routes")(db, secure);
 app.use("/profile", profileRoutes);
 
 // --- Locals middleware ---

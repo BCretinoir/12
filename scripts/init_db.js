@@ -8,7 +8,7 @@ if (!fs.existsSync(path.join(__dirname, "..", "data")))
   fs.mkdirSync(path.join(__dirname, "..", "data"));
 const sql = fs.readFileSync(path.join(__dirname, "init_db.sql"), "utf8");
 
-var db = mysql.createConnection({
+const db = mysql.createConnection({
   host: "localhost",
   user: "root",
   password: "",

@@ -4,7 +4,7 @@
   <h3>Bio</h3>
   <form method="POST" action="/profile/edit">
     <textarea name="bio" rows="4" cols="50"><%= user.bio || "" %></textarea>
-    <input type="hidden" name="_csrf" value="<%= csrfToken %>"/>
+    <input type="hidden" />
     <button type="submit">Mettre à jour la bio</button>
   </form>
 </section>
@@ -13,31 +13,49 @@
   <h3>Avatars</h3>
 
   <form method="POST" action="/profile/avatar" enctype="multipart/form-data">
-    <input type="file" name="avatar" accept="image/*" required/>
-    <input type="hidden" name="_csrf" value="<%= csrfToken %>"/>
+    <input type="file" name="avatar" accept="image/*" required />
+    <input type="hidden" />
     <button type="submit">Uploader un nouvel avatar</button>
   </form>
 
-  <ul style="list-style:none;padding:0;">
+  <ul style="list-style: none; padding: 0">
     <% avatars.forEach(avatar => { %>
-      <li style="margin-top:10px;">
-        <img src="/profile/avatar/<%= avatar.filename %>" alt="avatar" width="80" style="vertical-align:middle;"/>
-        <% if (avatar.is_active) { %>
-          <span style="color:green;font-weight:bold;">[Actif]</span>
-        <% } else { %>
-          <form method="POST" action="/profile/avatar/activate" style="display:inline;">
-            <input type="hidden" name="avatarId" value="<%= avatar.id %>"/>
-            <input type="hidden" name="_csrf" value="<%= csrfToken %>"/>
-            <button type="submit">Activer</button>
-          </form>
+    <li style="margin-top: 10px">
+      <img
+        src="/profile/avatar/<%= avatar.filename %>"
+        alt="avatar"
+        width="80"
+        style="vertical-align: middle"
+      />
+      <% if (avatar.is_active) { %>
+      <span style="color: green; font-weight: bold">[Actif]</span>
+      <% } else { %>
+      <form
+        method="POST"
+        action="/profile/avatar/activate"
+        style="display: inline"
+      >
+        <input type="hidden" name="avatarId" value="<%= avatar.id %>" />
+        <input type="hidden" />
+        <button type="submit">Activer</button>
+      </form>
 
-          <form method="POST" action="/profile/avatar/delete" style="display:inline;">
-            <input type="hidden" name="avatarId" value="<%= avatar.id %>"/>
-            <input type="hidden" name="_csrf" value="<%= csrfToken %>"/>
-            <button type="submit" onclick="return confirm('Supprimer cet avatar ?')">Supprimer</button>
-          </form>
-        <% } %>
-      </li>
+      <form
+        method="POST"
+        action="/profile/avatar/delete"
+        style="display: inline"
+      >
+        <input type="hidden" name="avatarId" value="<%= avatar.id %>" />
+        <input type="hidden" />
+        <button
+          type="submit"
+          onclick="return confirm('Supprimer cet avatar ?')"
+        >
+          Supprimer
+        </button>
+      </form>
+      <% } %>
+    </li>
     <% }) %>
   </ul>
 </section>

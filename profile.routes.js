@@ -4,10 +4,11 @@ const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
 
-module.exports = function (secure, db) {
+module.exports = function (db, secure) {
   const router = express.Router();
   const uploadDir = path.join(__dirname, "data", "uploads");
 
+  // Multer configuration
   const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => {
@@ -20,25 +21,34 @@ module.exports = function (secure, db) {
   });
   const upload = multer({ storage });
 
-  router.get("/", secure.requireAuth, (req, res) => {
+  // CSRF protection
+  
+
+  // --- ROUTES ---
+
+  // Affichage du profil
+  router.get("/",  (req, res) => {
+    
     db.query(
       "SELECT * FROM avatars WHERE user_id = ? ORDER BY id DESC",
       [req.session.userId],
       (err, avatars) => {
         if (err) return res.status(500).send("DB error");
+
         db.query(
           "SELECT bio FROM users WHERE id = ?",
           [req.session.userId],
           (err2, results) => {
             if (err2) return res.status(500).send("DB error");
+
             const user = {
               username: req.session.username,
               bio: results[0]?.bio || "",
             };
+
             res.render("profile", {
               user,
               avatars,
-              csrfToken: req.csrfToken(),
             });
           }
         );
@@ -46,7 +56,7 @@ module.exports = function (secure, db) {
     );
   });
 
-  router.post("/edit", secure.requireAuth, (req, res) => {
+  router.post("/edit",  (req, res) => {
     const bio = req.body.bio || "";
     db.query(
       "UPDATE users SET bio = ? WHERE id = ?",
@@ -63,14 +73,10 @@ module.exports = function (secure, db) {
 
   router.post(
     "/avatar",
-    secure.requireAuth,
     upload.single("avatar"),
-    secure.csrfProtection,
     async (req, res) => {
       if (!req.file) return res.status(400).send("No file uploaded");
       const filename = req.file.filename;
-
-      const db = req.app.locals.db;
 
       db.query(
         "INSERT INTO avatars (user_id, filename, is_active) VALUES (?, ?, 0)",
@@ -86,13 +92,15 @@ module.exports = function (secure, db) {
     }
   );
 
-  router.post("/avatar/activate", secure.requireAuth, (req, res) => {
+  router.post("/avatar/activate",(req, res) => {
     const avatarId = req.body.avatarId;
+
     db.query(
       "UPDATE avatars SET is_active = 0 WHERE user_id = ?",
       [req.session.userId],
       (err) => {
         if (err) return res.status(500).send("DB error");
+
         db.query(
           "UPDATE avatars SET is_active = 1 WHERE id = ? AND user_id = ?",
           [avatarId, req.session.userId],
@@ -113,8 +121,10 @@ module.exports = function (secure, db) {
     );
   });
 
-  router.post("/avatar/delete", secure.requireAuth, (req, res) => {
+  // Suppression d'un avatar
+  router.post("/avatar/delete", (req, res) => {
     const avatarId = req.body.avatarId;
+
     db.query(
       "SELECT filename, is_active FROM avatars WHERE id = ? AND user_id = ?",
       [avatarId, req.session.userId],
@@ -141,7 +151,8 @@ module.exports = function (secure, db) {
     );
   });
 
-  router.get("/avatar/:filename", secure.requireAuth, (req, res) => {
+  // Récupération d'un fichier avatar
+  router.get("/avatar/:filename", (req, res) => {
     const filePath = path.join(uploadDir, req.params.filename);
     if (!fs.existsSync(filePath)) return res.status(404).send("Not found");
     res.sendFile(filePath);
